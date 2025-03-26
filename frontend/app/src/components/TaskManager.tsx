@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import TaskItem from './TaskItem';
 
@@ -33,7 +33,7 @@ interface TaskInfo {
 }
 
 const API_BASE_URL = 'http://localhost:8000/api';
-const TASK_TYPES = ['dummy', 'hello', 'long']; // Available task types
+const TASK_TYPES = ['dummy']; // Available task types
 
 export default function TaskManager() {
   const [tasks, setTasks] = useState<TaskInfo[]>([]);
@@ -41,6 +41,19 @@ export default function TaskManager() {
   const [prompt, setPrompt] = useState('');
   const [taskType, setTaskType] = useState(TASK_TYPES[0]);
   const [keepPrompt, setKeepPrompt] = useState(false);
+  
+  // Add a ref to track active SSE connections
+  const activeConnections = useRef<{ [key: string]: EventSource }>({});
+
+  // Clean up function for SSE connections
+  useEffect(() => {
+    return () => {
+      // Clean up all active connections when component unmounts
+      Object.values(activeConnections.current).forEach(connection => {
+        connection.close();
+      });
+    };
+  }, []);
 
   // Load tasks from localStorage on component mount
   useEffect(() => {
@@ -99,10 +112,19 @@ export default function TaskManager() {
 
   // Promise-based function to subscribe to task updates
   async function waitForTaskCompletion(taskId: string): Promise<TaskInfo['result'] | null> {
+    // Check if there's already an active connection for this task
+    if (activeConnections.current[taskId]) {
+      console.log(`Already subscribed to task ${taskId}`);
+      return null;
+    }
+
     return new Promise((resolve, reject) => {
       console.log(`Starting waitForTaskCompletion for task ${taskId}`);
       const eventSource = new EventSource(`${API_BASE_URL}/subscribe/${taskId}`);
       
+      // Store the connection
+      activeConnections.current[taskId] = eventSource;
+
       // Handler for when the connection is opened
       eventSource.onopen = () => {
         console.log(`EventSource connection opened in waitForTaskCompletion for task ${taskId}`);
@@ -137,13 +159,15 @@ export default function TaskManager() {
           // Resolve the promise with the result
           resolve(result);
           
-          // Close connection on completion
+          // Close and remove connection on completion
           console.log(`Closing EventSource after completion in waitForTaskCompletion for task ${taskId}`);
           eventSource.close();
+          delete activeConnections.current[taskId];
         } catch (error) {
           console.error(`Error handling complete event in waitForTaskCompletion for task ${taskId}:`, error);
           reject(error);
           eventSource.close();
+          delete activeConnections.current[taskId];
         }
       });
 
@@ -180,7 +204,7 @@ export default function TaskManager() {
         }
       };
       
-      // Connection error handler
+      // Modify error handler to clean up connection
       eventSource.onerror = (error) => {
         console.error(`SSE connection error in waitForTaskCompletion for task ${taskId}:`, error);
         
@@ -196,6 +220,7 @@ export default function TaskManager() {
         // Don't immediately close and reject on first error - browser might retry
         if (eventSource.readyState === EventSource.CLOSED) {
           console.log(`EventSource closed in waitForTaskCompletion for task ${taskId}`);
+          delete activeConnections.current[taskId];
           reject(new Error('Error with SSE connection'));
         }
       };
@@ -209,6 +234,7 @@ export default function TaskManager() {
             error: 'Task timed out after 5 minutes'
           });
           eventSource.close();
+          delete activeConnections.current[taskId];
           reject(new Error('Task timed out'));
         }
       }, 300000); // 5 minute timeout
@@ -216,6 +242,7 @@ export default function TaskManager() {
       // Clean up timeout if event source closes
       eventSource.addEventListener('close', () => {
         clearTimeout(timeoutId);
+        delete activeConnections.current[taskId];
       });
     });
   }
@@ -233,7 +260,10 @@ export default function TaskManager() {
       
       // Add a timeout for the fetch request
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      const timeoutId = setTimeout(() => {
+        controller.abort();
+        console.log('Request timeout, aborting');
+      }, 10000); // 10 second timeout
       
       try {
         const response = await fetch(`${API_BASE_URL}/queue/${taskType}`, {
@@ -277,8 +307,14 @@ export default function TaskManager() {
         // Start listening for updates in the background
         waitForTaskCompletion(taskId).catch(error => {
           console.error(`Background task processing error: ${error.message}`);
+          // Update task with error status to ensure UI reflects the error
+          updateTask(taskId, {
+            status: 'error',
+            error: error.message || 'Error processing task'
+          });
         });
       } catch (fetchError) {
+        // Ensure we set loading to false in all error cases
         if (fetchError instanceof Error && fetchError.name === 'AbortError') {
           throw new Error('Request timed out after 10 seconds. The server might be overloaded or unavailable.');
         } else {
@@ -296,6 +332,7 @@ export default function TaskManager() {
         error: error instanceof Error ? error.message : 'Failed to submit task',
       }]);
     } finally {
+      // Ensure loading state is reset in all cases
       setLoading(false);
     }
   };
@@ -333,6 +370,12 @@ export default function TaskManager() {
             type="text"
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !loading) {
+                e.preventDefault();
+                submitTask();
+              }
+            }}
             placeholder="Enter task prompt..."
             className="block w-full p-2.5 border border-gray-300 rounded-md shadow-sm text-gray-800 font-medium"
           />
