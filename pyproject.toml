@@ -1,0 +1,19 @@
+[project]
+name = "celery-redis-taskqueue"
+version = "0.1.0"
+description = "Show case of submitting tasks through API and manage their status with Celery and Redis"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "asyncio>=3.4.3",
+    "celery>=5.3.0",
+    "fastapi>=0.100.0",
+    "httpx[socks]>=0.27.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.8.1",
+    "python-dotenv>=1.0.0",
+    "redis>=4.6.0",
+    "sse-starlette>=1.6.0",
+    "typing-extensions>=4.7.0",
+    "uvicorn>=0.23.0",
+]

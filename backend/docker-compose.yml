@@ -1,0 +1,61 @@
+services:
+  api:
+    build: .
+    container_name: api-server
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+    environment:
+      - API_HOST=0.0.0.0
+      - API_PORT=8000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # Add additional environment variables here or use .env file
+      
+    # env_file:
+    #   - .env
+    networks:
+      - celery-network
+
+  worker:
+    build: .
+    container_name: celery-worker
+    command: celery -A worker worker --loglevel=info
+    volumes:
+      - .:/app
+    depends_on:
+      - redis
+      - api
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      # Add additional environment variables here or use .env file
+      
+    # env_file:
+    #   - .env
+    networks:
+      - celery-network
+
+  redis:
+    image: redis:alpine
+    container_name: redis-broker
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - celery-network
+
+volumes:
+  redis-data:
+
+networks:
+  celery-network:
+    driver: bridge
