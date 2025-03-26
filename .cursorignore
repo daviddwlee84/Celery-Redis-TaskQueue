@@ -1,0 +1,4 @@
+# TODO: not sure what's the best practice
+.specstory/
+.venv/
+.vscode/

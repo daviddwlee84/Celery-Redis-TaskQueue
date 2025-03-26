@@ -15,7 +15,7 @@ class DummyClient:
     async def send_message(self, message: str) -> Any:
         import time
 
-        time.sleep(10)
+        time.sleep(3)
 
         # NOTE: just to simulate an error
         if "error" in message:
