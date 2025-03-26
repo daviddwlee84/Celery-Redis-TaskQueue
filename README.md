@@ -2,6 +2,38 @@
 
 Showcase of Celery x Redis for Task Queue
 
+## System Architecture
+
+```mermaid
+graph LR
+    subgraph "Frontend (Next.js)"
+        UI[User Interface]
+    end
+
+    subgraph "Backend (FastAPI)"
+        API[API Server]
+        Celery[Celery Worker]
+    end
+
+    subgraph "Redis"
+        Queue[(Message Broker)]
+        Results[(Result Backend)]
+    end
+
+    UI -->|HTTP Requests| API
+    API -->|1\. Submit Task| Queue
+    Queue -->|2\. Process Task| Celery
+    Celery -->|3\. Store Result| Results
+    API -->|4\. Get Result| Results
+    API -->|5\. Return Result| UI
+
+    style UI fill:#61DAFB
+    style API fill:#009688
+    style Celery fill:#A6D674
+    style Queue fill:#DC382D
+    style Results fill:#DC382D
+```
+
 ## Getting Started
 
 ```bash
