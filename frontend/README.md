@@ -1,5 +1,7 @@
 # Frontend
 
+> Basically created using vibe coding
+
 ---
 
 Cursor Setup:

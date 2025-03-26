@@ -40,6 +40,7 @@ export default function TaskManager() {
   const [loading, setLoading] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [taskType, setTaskType] = useState(TASK_TYPES[0]);
+  const [keepPrompt, setKeepPrompt] = useState(false);
 
   // Load tasks from localStorage on component mount
   useEffect(() => {
@@ -55,8 +56,14 @@ export default function TaskManager() {
         });
         setTasks(parsedTasks);
       }
+      
+      // Load keep prompt preference
+      const storedKeepPrompt = localStorage.getItem('keepPrompt');
+      if (storedKeepPrompt) {
+        setKeepPrompt(JSON.parse(storedKeepPrompt));
+      }
     } catch (error) {
-      console.error('Error loading tasks from localStorage:', error);
+      console.error('Error loading data from localStorage:', error);
     }
   }, []);
 
@@ -68,6 +75,15 @@ export default function TaskManager() {
       console.error('Error saving tasks to localStorage:', error);
     }
   }, [tasks]);
+  
+  // Save keepPrompt preference when it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem('keepPrompt', JSON.stringify(keepPrompt));
+    } catch (error) {
+      console.error('Error saving keepPrompt to localStorage:', error);
+    }
+  }, [keepPrompt]);
 
   // Helper function to update a specific task
   const updateTask = (taskId: string, updates: Partial<TaskInfo>) => {
@@ -214,42 +230,61 @@ export default function TaskManager() {
     try {
       setLoading(true);
       const taskId = uuidv4();
-      const response = await fetch(`${API_BASE_URL}/queue/${taskType}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({
-          task_id: taskId,
-          prompt: prompt,
-        } as DummyRequest),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+      
+      // Add a timeout for the fetch request
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      
+      try {
+        const response = await fetch(`${API_BASE_URL}/queue/${taskType}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',
+          },
+          body: JSON.stringify({
+            task_id: taskId,
+            prompt: prompt,
+          } as DummyRequest),
+          signal: controller.signal
+        });
+        
+        // Clear the timeout since the request completed
+        clearTimeout(timeoutId);
+  
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+        }
+        
+        const data: TaskResponse = await response.json();
+        
+        // Create new task
+        const newTask: TaskInfo = {
+          id: taskId,
+          status: data.status ?? 'pending',
+          createdAt: new Date(),
+        };
+        
+        // Add the task to state
+        setTasks(prev => [...prev, newTask]);
+        
+        // Clear the prompt field only if keepPrompt is false
+        if (!keepPrompt) {
+          setPrompt('');
+        }
+        
+        // Start listening for updates in the background
+        waitForTaskCompletion(taskId).catch(error => {
+          console.error(`Background task processing error: ${error.message}`);
+        });
+      } catch (fetchError) {
+        if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+          throw new Error('Request timed out after 10 seconds. The server might be overloaded or unavailable.');
+        } else {
+          throw fetchError;
+        }
       }
-      
-      const data: TaskResponse = await response.json();
-      
-      // Create new task
-      const newTask: TaskInfo = {
-        id: taskId,
-        status: data.status ?? 'pending',
-        createdAt: new Date(),
-      };
-      
-      // Add the task to state
-      setTasks(prev => [...prev, newTask]);
-      
-      // Clear the prompt field
-      setPrompt('');
-      
-      // Start listening for updates in the background
-      waitForTaskCompletion(taskId).catch(error => {
-        console.error(`Background task processing error: ${error.message}`);
-      });
       
     } catch (error) {
       console.error('Error submitting task:', error);
@@ -270,18 +305,18 @@ export default function TaskManager() {
 
   return (
     <div className="max-w-2xl mx-auto mt-10 p-6 bg-white rounded-lg shadow-lg">
-      <h2 className="text-2xl font-bold mb-6 text-center">Celery Task Manager</h2>
+      <h2 className="text-2xl font-bold mb-6 text-center text-gray-800">Celery Task Manager</h2>
       
       <div className="space-y-4 mb-6">
         <div>
-          <label htmlFor="taskType" className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="taskType" className="block text-base font-medium text-gray-700 mb-1">
             Task Type
           </label>
           <select
             id="taskType"
             value={taskType}
             onChange={(e) => setTaskType(e.target.value)}
-            className="block w-full p-2 border border-gray-300 rounded-md shadow-sm"
+            className="block w-full p-2.5 border border-gray-300 rounded-md shadow-sm text-gray-800 font-medium"
           >
             {TASK_TYPES.map(type => (
               <option key={type} value={type}>{type}</option>
@@ -290,7 +325,7 @@ export default function TaskManager() {
         </div>
         
         <div>
-          <label htmlFor="prompt" className="block text-sm font-medium text-gray-700 mb-1">
+          <label htmlFor="prompt" className="block text-base font-medium text-gray-700 mb-1">
             Task Prompt
           </label>
           <input
@@ -299,23 +334,36 @@ export default function TaskManager() {
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="Enter task prompt..."
-            className="block w-full p-2 border border-gray-300 rounded-md shadow-sm"
+            className="block w-full p-2.5 border border-gray-300 rounded-md shadow-sm text-gray-800 font-medium"
           />
+        </div>
+        
+        <div className="flex items-center">
+          <input
+            id="keepPrompt"
+            type="checkbox"
+            checked={keepPrompt}
+            onChange={(e) => setKeepPrompt(e.target.checked)}
+            className="h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+          />
+          <label htmlFor="keepPrompt" className="ml-2 block text-sm font-medium text-gray-700">
+            Keep prompt after submission
+          </label>
         </div>
         
         <button
           onClick={submitTask}
           disabled={loading}
-          className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded disabled:bg-blue-300"
+          className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2.5 px-4 rounded disabled:bg-blue-300 text-base"
         >
           {loading ? 'Submitting...' : 'Submit New Task'}
         </button>
       </div>
 
       <div className="space-y-4">
-        <h3 className="text-lg font-semibold">Task List</h3>
+        <h3 className="text-xl font-semibold text-gray-800">Task List</h3>
         {sortedTasks.length === 0 ? (
-          <p className="text-gray-500 text-center py-4">No tasks submitted yet</p>
+          <p className="text-gray-600 text-center py-4 font-medium">No tasks submitted yet</p>
         ) : (
           <div className="space-y-4">
             {sortedTasks.map((task) => (

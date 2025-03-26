@@ -223,19 +223,19 @@ export default function TaskItem({
     <div className="border rounded-lg p-4">
       <div className="flex justify-between items-start mb-2">
         <div>
-          <p className="text-sm text-gray-600">Task ID:</p>
-          <p className="font-mono text-sm break-all">{task.id}</p>
-          <p className="text-xs text-gray-400 mt-1">
+          <p className="text-sm font-medium text-gray-700">Task ID:</p>
+          <p className="font-mono text-sm font-medium break-all">{task.id}</p>
+          <p className="text-sm text-gray-600 mt-1">
             Created: {task.createdAt.toLocaleString()}
           </p>
         </div>
         <div className="flex flex-col items-end">
-          <span className={`font-semibold ${getStatusColor(task.status)}`}>
+          <span className={`font-semibold text-base ${getStatusColor(task.status)}`}>
             {task.status}
           </span>
           <button
             onClick={() => onDelete(task.id)}
-            className="mt-2 text-red-500 hover:text-red-700 text-sm"
+            className="mt-2 bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 font-medium text-sm px-3 py-1 rounded border border-red-200"
           >
             Delete
           </button>
@@ -243,15 +243,15 @@ export default function TaskItem({
       </div>
       
       {task.error && (
-        <div className="mt-2 text-red-500 text-sm">
+        <div className="mt-2 text-red-600 font-medium text-sm">
           Error: {task.error}
         </div>
       )}
       
       {task.result && (task.status.toLowerCase() === 'completed' || task.status.toLowerCase() === 'success') && (
         <div className="mt-2">
-          <p className="text-sm text-gray-600">Result:</p>
-          <pre className="mt-1 p-2 bg-gray-50 rounded text-sm overflow-x-auto">
+          <p className="text-sm font-medium text-gray-700">Result:</p>
+          <pre className="mt-1 p-3 bg-gray-50 rounded text-sm font-medium text-gray-800 overflow-x-auto border border-gray-200">
             {JSON.stringify(task.result, null, 2)}
           </pre>
         </div>
