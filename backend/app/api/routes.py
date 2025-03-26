@@ -95,54 +95,53 @@ async def queue_task(type: str, request: DummyRequest):
     return TaskResponse(task_id=task_id)
 
 
-# TODO: implement SSE (streaming events)
-# async def event_generator(task_id: str, request: Request):
-#     """Generate SSE events from Redis pub/sub."""
-#     # Subscribe to the Redis channel
-#     pubsub = redis_service.subscribe(f"task_stream:{task_id}")
-#
-#     try:
-#         # Check if the client is still connected
-#         while not await request.is_disconnected():
-#             # Get message from Redis pub/sub
-#             message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-#
-#             if message:
-#                 data = json.loads(message["data"])
-#                 event_type = data.get("event")
-#                 event_data = data.get("data")
-#
-#                 # Yield the event
-#                 yield {"event": event_type, "data": json.dumps(event_data)}
-#
-#                 # If this is the completion event, exit the loop
-#                 if event_type in ["complete", "error"]:
-#                     break
-#
-#             # Small sleep to prevent CPU spinning
-#             await asyncio.sleep(0.01)
-#
-#     except Exception as e:
-#         # Yield an error event
-#         yield {
-#             "event": "error",
-#             "data": json.dumps(
-#                 {
-#                     "status": "error",
-#                     "error": str(e),
-#                     "error_type": type(e).__name__,
-#                     "task_id": task_id,
-#                 }
-#             ),
-#         }
-#     finally:
-#         # Always unsubscribe from the channel
-#         pubsub.unsubscribe(f"task_stream:{task_id}")
-#         pubsub.close()
-#
-#
-# @router.get("/subscribe/{task_id}")
-# async def subscribe_claude_events(task_id: str, request: Request):
-#     """Stream events from a Claude 3.7 task."""
-#     # Return an event source response
-#     return EventSourceResponse(event_generator(task_id, request))
+async def event_generator(task_id: str, request: Request):
+    """Generate SSE events from Redis pub/sub."""
+    # Subscribe to the Redis channel
+    pubsub = redis_service.subscribe(f"task_stream:{task_id}")
+
+    try:
+        # Check if the client is still connected
+        while not await request.is_disconnected():
+            # Get message from Redis pub/sub
+            message = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+
+            if message:
+                data = json.loads(message["data"])
+                event_type = data.get("event")
+                event_data = data.get("data")
+
+                # Yield the event
+                yield {"event": event_type, "data": json.dumps(event_data)}
+
+                # If this is the completion event, exit the loop
+                if event_type in ["complete", "error"]:
+                    break
+
+            # Small sleep to prevent CPU spinning
+            await asyncio.sleep(0.01)
+
+    except Exception as e:
+        # Yield an error event
+        yield {
+            "event": "error",
+            "data": json.dumps(
+                {
+                    "status": "error",
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "task_id": task_id,
+                }
+            ),
+        }
+    finally:
+        # Always unsubscribe from the channel
+        pubsub.unsubscribe(f"task_stream:{task_id}")
+        pubsub.close()
+
+
+@router.get("/subscribe/{task_id}")
+async def subscribe_task_events(task_id: str, request: Request):
+    """Stream events from a task."""
+    # Return an event source response
+    return EventSourceResponse(event_generator(task_id, request))
