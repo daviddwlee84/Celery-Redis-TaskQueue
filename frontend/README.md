@@ -2,6 +2,8 @@
 
 > Basically created using vibe coding
 
+Currently my system Bun is version `1.1.36`
+
 ## Todo
 
 Known Issue

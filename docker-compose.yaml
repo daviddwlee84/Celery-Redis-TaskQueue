@@ -1,0 +1,40 @@
+services:
+  # Backend services
+  api:
+    extends:
+      file: backend/docker-compose.yml
+      service: api
+    build: ./backend  # Override build context
+
+  worker:
+    extends:
+      file: backend/docker-compose.yml
+      service: worker
+    build: ./backend  # Override build context
+
+  redis:
+    extends:
+      file: backend/docker-compose.yml
+      service: redis
+
+  # Frontend service with Bun
+  frontend:
+    build:
+      context: ./frontend
+    container_name: frontend-app
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://api:8000
+    depends_on:
+      - api
+    networks:
+      - celery-network
+
+volumes:
+  redis-data:
+
+networks:
+  celery-network:
+    driver: bridge 
