@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
+import TaskItem from './TaskItem';
 
 interface DummyRequest {
   task_id: string;
@@ -31,246 +32,53 @@ interface TaskInfo {
   error?: string;
 }
 
-type TaskEventData = {
-  status?: string;
-  result?: TaskStatus['result'];
-  error?: string;
-  content?: string;
-  task_id?: string;
-  timestamp?: number;
-  event?: string;
-  message?: string;
-  [key: string]: string | number | boolean | undefined | null | object;
-};
-
-// TaskItem component to handle individual task state and EventSource
-function TaskItem({ task, onUpdate }: { 
-  task: TaskInfo, 
-  onUpdate: (taskId: string, updates: Partial<TaskInfo>) => void 
-}) {
-  const [eventSource, setEventSource] = useState<EventSource | null>(null);
-  
-  // Connect to EventSource when component mounts
-  useEffect(() => {
-    // Only create the connection if task is in pending state
-    if (task.status.toLowerCase() === 'pending') {
-      const es = subscribeToTaskUpdates(task.id);
-      setEventSource(es);
-    }
-    
-    // Cleanup function
-    return () => {
-      if (eventSource && eventSource.readyState !== EventSource.CLOSED) {
-        console.log(`Closing event source for task ${task.id}`);
-        eventSource.close();
-      }
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [task.id]); // Only run on mount or if task.id changes
-  
-  function subscribeToTaskUpdates(taskId: string): EventSource {
-    const API_BASE_URL = 'http://localhost:8000/api';
-    console.log(`Opening EventSource connection for task ${taskId}`);
-    
-    // Create EventSource with proper params
-    const eventSource = new EventSource(`${API_BASE_URL}/subscribe/${taskId}`);
-    
-    // Handler for when the connection is opened
-    eventSource.onopen = () => {
-      console.log(`EventSource connection opened for task ${taskId}`);
-    };
-  
-    // Add specific event listeners for known event types
-    eventSource.addEventListener('start', (event: Event) => {
-      try {
-        console.log(`Start event received for task ${taskId}:`, event);
-        onUpdate(taskId, { status: 'started' });
-      } catch (error) {
-        console.error(`Error handling start event for task ${taskId}:`, error);
-      }
-    });
-    
-    eventSource.addEventListener('complete', (event: Event) => {
-      try {
-        const messageEvent = event as MessageEvent;
-        console.log(`Complete event received for task ${taskId}:`, messageEvent);
-        const eventData = JSON.parse(messageEvent.data);
-        
-        onUpdate(taskId, {
-          status: 'completed',
-          result: {
-            content: eventData.content,
-            task_id: eventData.task_id
-          }
-        });
-        
-        // Close connection on completion
-        console.log(`Closing EventSource after completion for task ${taskId}`);
-        eventSource.close();
-      } catch (error) {
-        console.error(`Error handling complete event for task ${taskId}:`, error);
-      }
-    });
-    
-    eventSource.addEventListener('error', (event: Event) => {
-      try {
-        const messageEvent = event as MessageEvent;
-        console.log(`Error event received for task ${taskId}:`, messageEvent);
-        
-        // Try to parse error data if available
-        if (messageEvent.data) {
-          const eventData = JSON.parse(messageEvent.data);
-          onUpdate(taskId, {
-            status: 'error',
-            error: eventData.error || eventData.message || 'Task failed'
-          });
-        } else {
-          onUpdate(taskId, {
-            status: 'error',
-            error: 'Task error with no details'
-          });
-        }
-      } catch (error) {
-        console.error(`Error handling error event for task ${taskId}:`, error);
-        onUpdate(taskId, {
-          status: 'error',
-          error: 'Error processing server error response'
-        });
-      } finally {
-        // Close connection on error event
-        console.log(`Closing EventSource after error event for task ${taskId}`);
-        eventSource.close();
-      }
-    });
-  
-    // General message handler as fallback
-    eventSource.onmessage = (event: MessageEvent) => {
-      try {
-        console.log(`General message received for task ${taskId}:`, event);
-        const eventData: TaskEventData = JSON.parse(event.data);
-        
-        // Handle different event types based on the data
-        if (eventData.status === 'success' || eventData.status === 'completed') {
-          onUpdate(taskId, {
-            status: 'completed',
-            result: {
-              content: eventData.content,
-              task_id: eventData.task_id
-            }
-          });
-          
-          // Close connection on completion
-          console.log(`Closing EventSource after completion (from onmessage) for task ${taskId}`);
-          eventSource.close();
-        } else if (eventData.status === 'failed' || eventData.status === 'error') {
-          onUpdate(taskId, {
-            status: 'error',
-            error: eventData.error || eventData.message || 'Task failed'
-          });
-          
-          // Close connection on error
-          console.log(`Closing EventSource after error (from onmessage) for task ${taskId}`);
-          eventSource.close();
-        } else if (eventData.event === 'start' || eventData.status === 'started') {
-          onUpdate(taskId, { status: 'started' });
-        }
-      } catch (error) {
-        console.error(`Error handling message for task ${taskId}:`, error);
-        onUpdate(taskId, {
-          status: 'error',
-          error: 'Error processing server response'
-        });
-        
-        // Close connection on error
-        console.log(`Closing EventSource after message error for task ${taskId}`);
-        eventSource.close();
-      }
-    };
-  
-    // Connection error handler
-    eventSource.onerror = (error) => {
-      console.error(`EventSource connection error for task ${taskId}`, error);
-      
-      // Only update status if the task is still pending or started
-      if (['pending', 'started'].includes(task.status.toLowerCase())) {
-        onUpdate(taskId, {
-          status: 'error',
-          error: 'Connection error - the task may still be processing'
-        });
-      }
-      
-      // Don't automatically close on first error - let browser retry
-      // Only close if connection is failed (not connecting)
-      if (eventSource.readyState === EventSource.CLOSED) {
-        console.log(`EventSource already closed for task ${taskId}`);
-      }
-    };
-  
-    return eventSource;
-  }
-  
-  const getStatusColor = (status: string) => {
-    const statusLower = status.toLowerCase();
-    switch (statusLower) {
-      case 'pending':
-      case 'started':
-        return 'text-orange-500';
-      case 'completed':
-      case 'success':
-        return 'text-green-500';
-      case 'error':
-      case 'failed':
-        return 'text-red-500';
-      default:
-        return 'text-gray-500';
-    }
-  };
-  
-  return (
-    <div className="border rounded-lg p-4">
-      <div className="flex justify-between items-start mb-2">
-        <div>
-          <p className="text-sm text-gray-600">Task ID:</p>
-          <p className="font-mono text-sm break-all">{task.id}</p>
-          <p className="text-xs text-gray-400 mt-1">
-            Created: {task.createdAt.toLocaleString()}
-          </p>
-        </div>
-        <span className={`font-semibold ${getStatusColor(task.status)}`}>
-          {task.status}
-        </span>
-      </div>
-      
-      {task.error && (
-        <div className="mt-2 text-red-500 text-sm">
-          Error: {task.error}
-        </div>
-      )}
-      
-      {task.result && (task.status.toLowerCase() === 'completed' || task.status.toLowerCase() === 'success') && (
-        <div className="mt-2">
-          <p className="text-sm text-gray-600">Result:</p>
-          <pre className="mt-1 p-2 bg-gray-50 rounded text-sm overflow-x-auto">
-            {JSON.stringify(task.result, null, 2)}
-          </pre>
-        </div>
-      )}
-    </div>
-  );
-}
-
 const API_BASE_URL = 'http://localhost:8000/api';
-const TASK_TYPE = 'dummy'; // Changed from 'test' to match your backend task type
+const TASK_TYPES = ['dummy', 'hello', 'long']; // Available task types
 
 export default function TaskManager() {
   const [tasks, setTasks] = useState<TaskInfo[]>([]);
   const [loading, setLoading] = useState(false);
+  const [prompt, setPrompt] = useState('');
+  const [taskType, setTaskType] = useState(TASK_TYPES[0]);
+
+  // Load tasks from localStorage on component mount
+  useEffect(() => {
+    try {
+      const storedTasks = localStorage.getItem('tasks');
+      if (storedTasks) {
+        // Parse the JSON and convert string dates back to Date objects
+        const parsedTasks = JSON.parse(storedTasks, (key, value) => {
+          if (key === 'createdAt') {
+            return new Date(value);
+          }
+          return value;
+        });
+        setTasks(parsedTasks);
+      }
+    } catch (error) {
+      console.error('Error loading tasks from localStorage:', error);
+    }
+  }, []);
+
+  // Save tasks to localStorage whenever tasks change
+  useEffect(() => {
+    try {
+      localStorage.setItem('tasks', JSON.stringify(tasks));
+    } catch (error) {
+      console.error('Error saving tasks to localStorage:', error);
+    }
+  }, [tasks]);
 
   // Helper function to update a specific task
   const updateTask = (taskId: string, updates: Partial<TaskInfo>) => {
     setTasks(prev => prev.map(task => 
       task.id === taskId ? { ...task, ...updates } : task
     ));
+  };
+
+  // Helper function to delete a task
+  const deleteTask = (taskId: string) => {
+    setTasks(prev => prev.filter(task => task.id !== taskId));
   };
 
   // Promise-based function to subscribe to task updates
@@ -397,10 +205,16 @@ export default function TaskManager() {
   }
 
   const submitTask = async () => {
+    // Don't submit if prompt is empty
+    if (!prompt.trim()) {
+      alert('Please enter a task prompt');
+      return;
+    }
+
     try {
       setLoading(true);
       const taskId = uuidv4();
-      const response = await fetch(`${API_BASE_URL}/queue/${TASK_TYPE}`, {
+      const response = await fetch(`${API_BASE_URL}/queue/${taskType}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -408,7 +222,7 @@ export default function TaskManager() {
         },
         body: JSON.stringify({
           task_id: taskId,
-          prompt: 'Test task',
+          prompt: prompt,
         } as DummyRequest),
       });
 
@@ -428,6 +242,9 @@ export default function TaskManager() {
       
       // Add the task to state
       setTasks(prev => [...prev, newTask]);
+      
+      // Clear the prompt field
+      setPrompt('');
       
       // Start listening for updates in the background
       waitForTaskCompletion(taskId).catch(error => {
@@ -455,13 +272,45 @@ export default function TaskManager() {
     <div className="max-w-2xl mx-auto mt-10 p-6 bg-white rounded-lg shadow-lg">
       <h2 className="text-2xl font-bold mb-6 text-center">Celery Task Manager</h2>
       
-      <button
-        onClick={submitTask}
-        disabled={loading}
-        className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded disabled:bg-blue-300 mb-6"
-      >
-        {loading ? 'Submitting...' : 'Submit New Task'}
-      </button>
+      <div className="space-y-4 mb-6">
+        <div>
+          <label htmlFor="taskType" className="block text-sm font-medium text-gray-700 mb-1">
+            Task Type
+          </label>
+          <select
+            id="taskType"
+            value={taskType}
+            onChange={(e) => setTaskType(e.target.value)}
+            className="block w-full p-2 border border-gray-300 rounded-md shadow-sm"
+          >
+            {TASK_TYPES.map(type => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+        </div>
+        
+        <div>
+          <label htmlFor="prompt" className="block text-sm font-medium text-gray-700 mb-1">
+            Task Prompt
+          </label>
+          <input
+            id="prompt"
+            type="text"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            placeholder="Enter task prompt..."
+            className="block w-full p-2 border border-gray-300 rounded-md shadow-sm"
+          />
+        </div>
+        
+        <button
+          onClick={submitTask}
+          disabled={loading}
+          className="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded disabled:bg-blue-300"
+        >
+          {loading ? 'Submitting...' : 'Submit New Task'}
+        </button>
+      </div>
 
       <div className="space-y-4">
         <h3 className="text-lg font-semibold">Task List</h3>
@@ -473,7 +322,8 @@ export default function TaskManager() {
               <TaskItem 
                 key={task.id} 
                 task={task} 
-                onUpdate={updateTask} 
+                onUpdate={updateTask}
+                onDelete={deleteTask}
               />
             ))}
           </div>
