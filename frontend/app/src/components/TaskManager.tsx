@@ -140,6 +140,50 @@ export default function TaskManager() {
         }
       });
       
+      // Add specific listener for error events from the server
+      eventSource.addEventListener('error', (event: Event) => {
+        try {
+          const messageEvent = event as MessageEvent;
+          console.log(`Error event received from server for task ${taskId}:`, messageEvent);
+          
+          let errorData;
+          try {
+            errorData = JSON.parse(messageEvent.data);
+          } catch (parseError) {
+            console.error(`Failed to parse error data from server:`, parseError);
+            errorData = { error: 'Failed to parse error data from server' };
+          }
+          
+          // Update task with detailed error information from server
+          updateTask(taskId, {
+            status: 'error',
+            error: errorData.error || 'Unknown server error'
+          });
+          
+          // Reject the promise with the error from the server
+          const error = new Error(errorData.error || 'Task failed on server');
+          reject(error);
+          
+          // Clean up the connection
+          console.log(`Closing EventSource after receiving error event for task ${taskId}`);
+          eventSource.close();
+          delete activeConnections.current[taskId];
+        } catch (handlingError) {
+          console.error(`Error handling server error event for task ${taskId}:`, handlingError);
+          
+          // Still update the task with a fallback error message
+          updateTask(taskId, {
+            status: 'error',
+            error: 'Error processing server error message'
+          });
+          
+          // Reject and clean up
+          reject(handlingError);
+          eventSource.close();
+          delete activeConnections.current[taskId];
+        }
+      });
+      
       eventSource.addEventListener('complete', (event: Event) => {
         try {
           const messageEvent = event as MessageEvent;
@@ -189,9 +233,23 @@ export default function TaskManager() {
             const result = data.result || { content: data.content, task_id: data.task_id };
             resolve(result);
             eventSource.close();
+            delete activeConnections.current[taskId];
           } else if (data.status === 'failed' || data.status === 'error') {
-            reject(new Error(data.error || data.message || 'Task failed'));
+            console.log(`Task ${taskId} failed with error:`, data.error || data.message);
+            
+            // Update task with error information from server
+            updateTask(taskId, {
+              status: 'error',
+              error: data.error || data.message || 'Task failed'
+            });
+            
+            // Pass the error information to the caller
+            const error = new Error(data.error || data.message || 'Task failed');
+            reject(error);
+            
+            // Clean up the connection
             eventSource.close();
+            delete activeConnections.current[taskId];
           }
         } catch (error) {
           console.error(`Error parsing event data in waitForTaskCompletion:`, error);
@@ -201,27 +259,34 @@ export default function TaskManager() {
           });
           reject(error);
           eventSource.close();
+          delete activeConnections.current[taskId];
         }
       };
       
-      // Modify error handler to clean up connection
+      // Modify error handler to be more resilient and properly clean up
       eventSource.onerror = (error) => {
         console.error(`SSE connection error in waitForTaskCompletion for task ${taskId}:`, error);
         
-        // Only update status if it's not already in an error state
-        const taskStatus = tasks.find(t => t.id === taskId)?.status;
-        if (taskStatus && ['pending', 'started'].includes(taskStatus.toLowerCase())) {
+        // Only update status if we haven't received a more specific error from server
+        const currentTask = tasks.find(t => t.id === taskId);
+        if (currentTask && (!currentTask.error || currentTask.error.includes('Connection error')) && 
+            ['pending', 'started'].includes(currentTask.status.toLowerCase())) {
           updateTask(taskId, {
             status: 'error',
             error: 'Connection error - the task may still be processing'
           });
         }
         
-        // Don't immediately close and reject on first error - browser might retry
+        // Don't immediately close on first error - browser might retry
         if (eventSource.readyState === EventSource.CLOSED) {
           console.log(`EventSource closed in waitForTaskCompletion for task ${taskId}`);
           delete activeConnections.current[taskId];
-          reject(new Error('Error with SSE connection'));
+          
+          // Only reject if we haven't already processed a more specific error
+          const task = tasks.find(t => t.id === taskId);
+          if (task && (!task.error || task.error.includes('Connection error'))) {
+            reject(new Error('SSE connection error'));
+          }
         }
       };
       

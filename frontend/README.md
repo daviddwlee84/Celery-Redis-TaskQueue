@@ -2,6 +2,13 @@
 
 > Basically created using vibe coding
 
+## Todo
+
+Known Issue
+
+- [ ] Task submission is a little bit slow (stuck at `Submitting...` for a long time if submit multiple tasks)
+- [ ] Failed to capture server side error message properly (which will cause SSE disconnection)
+
 ---
 
 Cursor Setup:
