@@ -379,6 +379,129 @@ _**Assistant**_
 
 ---
 
+You're right - we need to specifically listen for the server's "error" event to properly display the error information. Let me fix that:
+
+---
+
+```diff
+          }
+        });
++       
++       // Add specific listener for error events from the server
++       eventSource.addEventListener('error', (event: Event) => {
++         try {
++           const messageEvent = event as MessageEvent;
++           console.log(`Error event received from server for task ${taskId}:`, messageEvent);
++           
++           let errorData;
++           try {
++             errorData = JSON.parse(messageEvent.data);
++           } catch (parseError) {
++             errorData = { error: 'Failed to parse error data from server' };
++           }
++           
++           // Update task with detailed error information from server
++           updateTask(taskId, {
++             status: 'error',
++             error: errorData.error || 'Unknown server error'
++           });
++           
++           // Reject the promise with the error from the server
++           const error = new Error(errorData.error || 'Task failed on server');
++           reject(error);
++           
++           // Clean up the connection
++           console.log(`Closing EventSource after receiving error event for task ${taskId}`);
++           eventSource.close();
++           delete activeConnections.current[taskId];
++         } catch (handlingError) {
++           console.error(`Error handling server error event for task ${taskId}:`, handlingError);
++           
++           // Still update the task with a fallback error message
++           updateTask(taskId, {
++             status: 'error',
++             error: 'Error processing server error message'
++           });
++           
++           // Reject and clean up
++           reject(handlingError);
++           eventSource.close();
++           delete activeConnections.current[taskId];
++         }
++       });
+        
+        eventSource.addEventListener('complete', (event: Event) => {
+```
+
+---
+
+```diff
+              errorData = JSON.parse(messageEvent.data);
+            } catch (parseError) {
++             console.error(`Failed to parse error data from server: ${parseError.message}`);
+              errorData = { error: 'Failed to parse error data from server' };
+            }
+```
+
+---
+
+```diff
+              errorData = JSON.parse(messageEvent.data);
+            } catch (parseError) {
+-             console.error(`Failed to parse error data from server: ${parseError.message}`);
++             console.error(`Failed to parse error data from server:`, parseError);
+              errorData = { error: 'Failed to parse error data from server' };
+            }
+```
+
+---
+
+Now your frontend will correctly handle the server-side error events and display the proper error message. Here's what I've fixed:
+
+1. **Added Dedicated Error Event Listener:**
+   - Added a specific event listener for the 'error' event type sent by the server
+   - This is separate from the EventSource's built-in error handler (onerror)
+
+2. **Proper Error Data Handling:**
+   - The listener will properly parse and extract the error message sent by the server:
+     ```json
+     {
+       "status": "error",
+       "error": "Error",
+       "error_type": "Exception",
+       "task_id": "..."
+     }
+     ```
+   - It will display the actual error message from the server (e.g., "Error" when "error" is in the prompt)
+   - It handles JSON parsing errors gracefully
+
+3. **Clean Resource Management:**
+   - Ensures the EventSource connection is closed properly
+   - Removes the connection from the active connections tracking
+   - Properly rejects the promise with the actual error message
+
+Now when an error occurs on the server side (like when you submit a task with "error" in the prompt), your frontend will:
+
+1. Receive the specific "error" event from the server
+2. Extract and display the actual error message (e.g., "Error" instead of "Connection error")
+3. Properly handle the error state in the UI
+
+This should resolve the issue where you see "Connection error - the task may still be processing" instead of the actual server error message.
+
+---
+
+_**User**_
+
+Ah, maybe you can use `/api/task{task_id}` as a SSE disconnection fallback
+
+---
+
+_**Assistant**_
+
+
+
+---
+
 
 
 ---

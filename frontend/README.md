@@ -7,7 +7,7 @@
 Known Issue
 
 - [ ] Task submission is a little bit slow (stuck at `Submitting...` for a long time if submit multiple tasks)
-- [ ] Failed to capture server side error message properly (which will cause SSE disconnection)
+- [X] Failed to capture server side error message properly (which will cause SSE disconnection)
 
 ---
 

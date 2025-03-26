@@ -271,14 +271,65 @@ export default function TaskManager() {
         const currentTask = tasks.find(t => t.id === taskId);
         if (currentTask && (!currentTask.error || currentTask.error.includes('Connection error')) && 
             ['pending', 'started'].includes(currentTask.status.toLowerCase())) {
-          updateTask(taskId, {
-            status: 'error',
-            error: 'Connection error - the task may still be processing'
-          });
-        }
-        
-        // Don't immediately close on first error - browser might retry
-        if (eventSource.readyState === EventSource.CLOSED) {
+          
+          // Use the task status endpoint as a fallback
+          console.log(`Attempting to fetch task status as fallback for ${taskId}`);
+          fetch(`${API_BASE_URL}/task/${taskId}`)
+            .then(response => {
+              if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+              }
+              return response.json();
+            })
+            .then(data => {
+              console.log(`Fallback task status for ${taskId}:`, data);
+              
+              if (data.status === 'error' || data.status === 'failed') {
+                // Handle error status
+                updateTask(taskId, {
+                  status: 'error',
+                  error: data.error || 'Task failed on server'
+                });
+              } else if (data.status === 'completed' || data.status === 'success') {
+                // Handle completion
+                updateTask(taskId, {
+                  status: 'completed',
+                  result: data.result
+                });
+                // We got the result, so resolve the promise
+                resolve(data.result);
+              } else {
+                // Still processing or unknown status
+                updateTask(taskId, {
+                  status: data.status || 'pending',
+                });
+                
+                // For other statuses, just show a connection error
+                if (eventSource.readyState === EventSource.CLOSED) {
+                  updateTask(taskId, {
+                    status: 'error',
+                    error: 'Connection error - the task may still be processing'
+                  });
+                }
+              }
+            })
+            .catch(fetchError => {
+              console.error(`Error fetching fallback status for ${taskId}:`, fetchError);
+              // Update UI with connection error only if no other specific error
+              updateTask(taskId, {
+                status: 'error',
+                error: 'Connection error - the task may still be processing'
+              });
+            })
+            .finally(() => {
+              // Clean up the connection if it's closed
+              if (eventSource.readyState === EventSource.CLOSED) {
+                delete activeConnections.current[taskId];
+                // Only reject if we haven't already resolved
+                reject(new Error('SSE connection error'));
+              }
+            });
+        } else if (eventSource.readyState === EventSource.CLOSED) {
           console.log(`EventSource closed in waitForTaskCompletion for task ${taskId}`);
           delete activeConnections.current[taskId];
           

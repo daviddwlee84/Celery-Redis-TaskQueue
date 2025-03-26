@@ -186,10 +186,55 @@ export default function TaskItem({
       
       // Only update status if the task is still pending or started
       if (['pending', 'started'].includes(task.status.toLowerCase())) {
-        onUpdate(taskId, {
-          status: 'error',
-          error: 'Connection error - the task may still be processing'
-        });
+        // Attempt to get the task status directly as a fallback
+        const API_BASE_URL = 'http://localhost:8000/api';
+        console.log(`TaskItem: Attempting to fetch task status as fallback for ${taskId}`);
+        
+        fetch(`${API_BASE_URL}/task/${taskId}`)
+          .then(response => {
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+          })
+          .then(data => {
+            console.log(`TaskItem: Fallback task status for ${taskId}:`, data);
+            
+            if (data.status === 'error' || data.status === 'failed') {
+              // Handle error status
+              onUpdate(taskId, {
+                status: 'error',
+                error: data.error || 'Task failed on server'
+              });
+            } else if (data.status === 'completed' || data.status === 'success') {
+              // Handle completion
+              onUpdate(taskId, {
+                status: 'completed',
+                result: data.result
+              });
+            } else {
+              // Still processing or unknown status
+              onUpdate(taskId, {
+                status: data.status || 'pending',
+              });
+              
+              // For unknown statuses when connection is closed, show generic error
+              if (eventSource.readyState === EventSource.CLOSED) {
+                onUpdate(taskId, {
+                  status: 'error',
+                  error: 'Connection error - the task may still be processing'
+                });
+              }
+            }
+          })
+          .catch(fetchError => {
+            console.error(`TaskItem: Error fetching fallback status for ${taskId}:`, fetchError);
+            // Update UI with connection error
+            onUpdate(taskId, {
+              status: 'error',
+              error: 'Connection error - the task may still be processing'
+            });
+          });
       }
       
       // Don't automatically close on first error - let browser retry
