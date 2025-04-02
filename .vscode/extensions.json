@@ -11,5 +11,6 @@
         "donjayamanne.githistory",
         "eamodio.gitlens",
         "mechatroner.rainbow-csv",
+        "esbenp.prettier-vscode",
     ]
 }
